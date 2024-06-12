@@ -3,23 +3,30 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/spf13/viper"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/spf13/viper"
 )
 
 func main() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting cwd:", err)
+		return
+	}
+
 	appPath, err := getAppPath()
 	if err != nil {
 		return
 	}
-	repoUrls, err := getXbpsRepos()
+	repoUrls, err := getXbpsRepos(cwd)
 	if err != nil {
 		return
-	}
-
-	for _, url := range repoUrls {
-		fmt.Println(url)
 	}
 
 	appDir := filepath.Join(appPath, "void-repos")
@@ -27,6 +34,23 @@ func main() {
 	if err != nil {
 		return
 	}
+
+	fmt.Println("Trying to create app dir:", appDir)
+	err = os.MkdirAll(appDir, os.ModePerm)
+	if err != nil {
+		fmt.Println("error creating app directory")
+		return
+	}
+	fmt.Println("Created app dir:", appDir)
+	for _, url := range repoUrls {
+		if err := cloneRepo(appDir, url); err != nil {
+			return
+		}
+	}
+	// if err = cloneRepo(appDir, repoUrls[0]); err != nil {
+	// 	return
+	// }
+	fmt.Println("Successfully cloned repos")
 }
 
 func getAppPath() (path string, err error) {
@@ -40,14 +64,7 @@ func getAppPath() (path string, err error) {
 	return
 }
 
-func getXbpsRepos() (repoUrls []string, err error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting cwd:", err)
-		return
-	}
-	fmt.Println("CWD:", cwd)
-
+func getXbpsRepos(cwd string) (repoUrls []string, err error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(cwd)
@@ -67,11 +84,33 @@ func cleanDir(path string) (err error) {
 	_, err = os.Stat(path)
 	if os.IsNotExist(err) {
 		fmt.Println("App dir does not exist")
+		err = nil
 		return
 	}
 	err = os.RemoveAll(path)
 	if err != nil {
 		fmt.Println("Error deleting app dir:", err)
 	}
+	fmt.Println("Successfully cleaned app dir")
+	return
+}
+
+func cloneRepo(appDir string, repoUrl string) (err error) {
+	parsedUrl, err := url.Parse(repoUrl)
+	if err != nil {
+		return
+	}
+	repoWithExt := path.Base(parsedUrl.Path)
+	repoName := strings.TrimSuffix(repoWithExt, ".git")
+
+	_, err = git.PlainClone(appDir+"/"+repoName, false, &git.CloneOptions{
+		URL:      repoUrl,
+		Progress: os.Stdout,
+	})
+	if err != nil {
+		fmt.Println("Error cloning repo:", repoUrl)
+		return
+	}
+	fmt.Println("Successfully cloned repo", repoUrl)
 	return
 }
